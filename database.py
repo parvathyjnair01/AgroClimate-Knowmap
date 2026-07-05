@@ -4,7 +4,8 @@ import streamlit as st
 import logging
 
 # Load Neo4j credentials from .env file
-NEO4J_URI = config("NEO4J_URI", default="bolt://localhost:7687")
+# Default to Docker-mapped Bolt port 7688 so it connects out-of-the-box
+NEO4J_URI = config("NEO4J_URI", default="bolt://127.0.0.1:7688")
 NEO4J_USER = config("NEO4J_USER", default="neo4j")
 NEO4J_PASSWORD = config("NEO4J_PASSWORD")
 
@@ -15,13 +16,23 @@ def get_neo4j_graph():
     Returns the Graph object or None if connection fails.
     """
     try:
-        graph = Graph(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-        # Test the connection by fetching database names
-        graph.run("SHOW DATABASES YIELD name LIMIT 1")
+        # Explicitly disable encryption to avoid TLS mismatches
+        graph = Graph(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD), secure=False)
+        # Simple ping to validate connectivity and auth
+        ok = graph.run("RETURN 1 AS x").evaluate()
+        if ok != 1:
+            logging.error("Neo4j ping returned unexpected result")
+            return None
         logging.info("✅ Neo4j connection successful.")
         return graph
     except Exception as e:
-        logging.error(f"Failed to connect to Neo4j: {e}")
+        # Surface detailed error in Streamlit for easier debugging
+        msg = f"Failed to connect to Neo4j at {NEO4J_URI} as {NEO4J_USER}: {e}"
+        logging.error(msg)
+        try:
+            st.error(msg)
+        except Exception:
+            pass
         return None
 
 def clear_database():
@@ -53,8 +64,8 @@ def get_subgraph_by_names(node_names: list) -> list:
     # This query finds all nodes with the given names and their direct (1-hop) relationships
     query = """
     UNWIND $names AS nodeName
-    MATCH (n {name: nodeName})
-    OPTIONAL MATCH (n)-[r]-(m)
+    MATCH (n:Entity {name: nodeName})
+    OPTIONAL MATCH (n)-[r]-(m:Entity)
     RETURN n.name AS source, type(r) AS relation, m.name AS target
     """
     

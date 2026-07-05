@@ -8,9 +8,9 @@ output:
   log_jsonl: "agrobase/module_climate_smart_farming/output/run_log.jsonl"
 neo4j:
   enabled: true
-  uri: "bolt://localhost:8687"
+  uri: "bolt://localhost:7688"
   user: "neo4j"
-  password: "password"
+  password: "StrongPass123"
 risk:
   weights:
     drought: 0.3

@@ -87,14 +87,33 @@ with col1:
             rels = graph.run("MATCH ()-[r]-() RETURN count(r) AS c").evaluate()
             st.metric("Nodes", nodes)
             st.metric("Relationships", rels)
-            if st.button("Clear Neo4j Database (DELETE ALL)"):
-                if st.confirm("Are you sure? This will DELETE ALL nodes and relationships."):
-                    with st.spinner("Clearing database..."):
-                        ok = database.clear_database()
-                        if ok:
-                            st.success("Neo4j cleared.")
-                        else:
-                            st.error("Failed to clear Neo4j")
+            # Streamlit has no st.confirm; use checkbox-gated delete
+            st.warning("This will DELETE ALL nodes and relationships.")
+            confirm_delete = st.checkbox(
+                "I understand. Proceed with deletion.", key="confirm_delete_main"
+            )
+            col_left, col_right = st.columns([1, 1])
+            with col_left:
+                delete_clicked = st.button(
+                    "Clear Neo4j Database (DELETE ALL)",
+                    type="primary",
+                    disabled=not confirm_delete,
+                    key="btn_delete_all",
+                )
+            with col_right:
+                confirm_clicked = st.button(
+                    "Confirm Delete",
+                    type="secondary",
+                    disabled=not confirm_delete,
+                    key="btn_confirm_delete",
+                )
+            if (delete_clicked or confirm_clicked) and confirm_delete:
+                with st.spinner("Clearing database..."):
+                    ok = database.clear_database()
+                    if ok:
+                        st.success("Neo4j cleared.")
+                    else:
+                        st.error("Failed to clear Neo4j")
         except Exception as e:
             st.error(f"Error querying Neo4j: {e}")
 

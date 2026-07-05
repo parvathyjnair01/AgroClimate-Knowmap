@@ -1,0 +1,6 @@
+practice,category,description,conditions
+Drought-resilient varieties,crop,"Use varieties with enhanced drought tolerance",rainfall<700
+Adaptive irrigation,water,"Implement soil moisture sensors and drip systems",rainfall<800
+Cover crops,soil,"Introduce cover crops to improve organic matter and moisture retention",risk_level=High
+Mulching,soil,"Apply organic mulches to reduce evaporation and moderate soil temperature",temperature>28
+Integrated pest management,pest,"Employ biological controls and monitoring to reduce outbreaks",risk_level=Moderate

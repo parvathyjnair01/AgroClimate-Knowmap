@@ -1,6 +1,50 @@
 import streamlit as st
 import requests
+import os, base64
 
+
+def _set_page_background(candidates, opacity: float = 0.18) -> None:
+    try:
+        chosen = None
+        base_dir = os.path.dirname(__file__)
+        for c in candidates:
+            paths = [
+                os.path.normpath(os.path.join(os.getcwd(), c)),
+                os.path.normpath(os.path.join(base_dir, '..', c)),
+            ]
+            for p in paths:
+                if os.path.exists(p):
+                    chosen = p
+                    break
+            if chosen:
+                break
+        if not chosen:
+            return
+        with open(chosen, 'rb') as f:
+            b64 = base64.b64encode(f.read()).decode()
+        overlay = max(0.0, min(1.0, opacity))
+        st.markdown(
+            f"""
+            <style>
+            [data-testid=\"stAppViewContainer\"] {{
+                background-image: linear-gradient(rgba(255,255,255,{overlay}), rgba(255,255,255,{overlay})), url('data:image;base64,{b64}');
+                background-size: cover;
+                background-position: center;
+                background-repeat: no-repeat;
+            }}
+            [data-testid=\"stHeader\"], [data-testid=\"stToolbar\"] {{ background: transparent; }}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+    except Exception:
+        pass
+
+_set_page_background([
+    'static/bg_carbon.png.jpg',
+    'static/bg_carbon.jpg',
+    'static/bg_carbon.png',
+], opacity=0.60)
 st.title("🌳 Carbon Sequestration")
 st.caption("Run the carbon pipeline API and explore practice scenarios.")
 

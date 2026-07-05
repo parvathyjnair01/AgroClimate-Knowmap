@@ -1,4 +1,4 @@
-# pages/3_DataIngestion.py
+# pages/3_Data_Ingestion.py
 
 import streamlit as st
 import pandas as pd
@@ -88,36 +88,39 @@ if st.sidebar.button("Logout 🚪"):
     st.session_state.pop("jwt_token", None)
     st.rerun()
 
+# --- [SESSION STATE INITIALIZATION] ---
+# We initialize a key to hold the extracted triples so they persist across reruns.
+if "ingestion_triples" not in st.session_state:
+    st.session_state["ingestion_triples"] = None
+if "ingestion_source" not in st.session_state:
+    st.session_state["ingestion_source"] = ""
+
 # --- [HELPERS] ---
 def strip_html(text: str) -> str:
     text = re.sub(r"<[^>]+>", " ", text)
     return re.sub(r"\s+", " ", text).strip()
 
-def process_text_block(text: str):
+def run_extraction_pipeline(text: str, source_label: str):
+    """
+    Runs the NLP pipeline and saves results to Session State.
+    Does NOT render the store button itself.
+    """
     if not text or not text.strip():
         st.warning("Please provide some text.")
         return
-    with st.spinner("Running KNOWMAP NLP pipeline..."):
+
+    with st.spinner(f"Running KNOWMAP NLP pipeline on {source_label}..."):
         nlp = pipelines_extraction.load_nlp_model()
         cleaned_text = pipelines_text_cleaner.clean_text(text)
         triples = pipelines_extraction.extract_triples(cleaned_text, nlp)
+    
     if not triples:
         st.warning("No structured triples found. Try adding more context.")
-        return
-    st.success(f"✅ Extracted {len(triples)} knowledge triples.")
-    df = pd.DataFrame(triples, columns=["Subject", "Relation", "Object"])
-    st.dataframe(df, use_container_width=True)
-    try:
-        G = pipelines_extraction.triples_to_graph(triples)
-        html = pipelines_extraction.graph_to_pyvis_html(G)
-        components.html(html, height=600, scrolling=True)
-    except Exception as e:
-        st.warning(f"Graph render failed: {e}")
-    if st.button("📡 Store in Neo4j Database", use_container_width=True):
-        with st.spinner("Storing triples in Neo4j..."):
-            count = pipelines_neo4j_loader.store_triples_in_neo4j(triples)
-        st.success(f"Stored {count} triples successfully in Neo4j graph!")
-
+        st.session_state["ingestion_triples"] = None
+    else:
+        st.session_state["ingestion_triples"] = triples
+        st.session_state["ingestion_source"] = source_label
+        st.success(f"✅ Successfully extracted {len(triples)} triples! Scroll down to review and store.")
 
 # --- [MAIN LAYOUT] ---
 st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -126,79 +129,67 @@ tab_text, tab_file, tab_wiki, tab_news, tab_arxiv = st.tabs([
     "Text", "File", "Wikipedia", "News", "arXiv"
 ])
 
+# --- TAB: TEXT ---
 with tab_text:
     text_input = st.text_area(
         "Paste or type data related to agriculture or climate systems:",
         height=220,
         placeholder="Example: High soil salinity reduces wheat yield and affects irrigation efficiency..."
     )
-    if st.button("🔍 Run NLP Pipeline", type="primary"):
-        process_text_block(text_input)
+    if st.button("🔍 Run NLP Pipeline", type="primary", key="btn_text"):
+        run_extraction_pipeline(text_input, "Manual Text Input")
 
+# --- TAB: FILE ---
 with tab_file:
     up = st.file_uploader("Upload CSV or TXT", type=["csv", "txt"])
-    if st.button("Process File", disabled=not up):
+    if st.button("Process File", disabled=not up, key="btn_file"):
         if not up:
             st.warning("Please select a file.")
         else:
-            nlp = pipelines_extraction.load_nlp_model()
-            triples = pipelines_extraction.extract_triples_from_file(up.read(), up.name, nlp)
-            if not triples:
-                st.warning("No triples extracted from file.")
-            else:
-                st.success(f"Extracted {len(triples)} triples from file.")
-                df = pd.DataFrame(triples, columns=["Subject", "Relation", "Object"])
-                st.dataframe(df, use_container_width=True)
-                try:
-                    G = pipelines_extraction.triples_to_graph(triples)
-                    html = pipelines_extraction.graph_to_pyvis_html(G)
-                    components.html(html, height=600, scrolling=True)
-                except Exception as e:
-                    st.warning(f"Graph render failed: {e}")
-                if st.button("📡 Store in Neo4j Database", use_container_width=True):
-                    with st.spinner("Storing triples in Neo4j..."):
-                        count = pipelines_neo4j_loader.store_triples_in_neo4j(triples)
-                    st.success(f"Stored {count} triples successfully in Neo4j graph!")
+            with st.spinner("Processing file..."):
+                nlp = pipelines_extraction.load_nlp_model()
+                # Use the extraction logic directly here as it differs slightly (file bytes)
+                triples = pipelines_extraction.extract_triples_from_file(up.read(), up.name, nlp)
+                
+                if not triples:
+                    st.warning("No triples extracted from file.")
+                    st.session_state["ingestion_triples"] = None
+                else:
+                    st.session_state["ingestion_triples"] = triples
+                    st.session_state["ingestion_source"] = f"File: {up.name}"
+                    st.success(f"✅ Extracted {len(triples)} triples from file! Scroll down to review.")
 
+# --- TAB: WIKIPEDIA ---
 with tab_wiki:
     topic = st.text_input("Wikipedia topic", placeholder="e.g., Wheat, Drought, Soil salinity")
-    if st.button("Fetch from Wikipedia"):
+    if st.button("Fetch from Wikipedia", key="btn_wiki"):
         if not topic:
             st.warning("Enter a topic.")
         else:
             import urllib.parse
             text = ""
-            # Use the summary endpoint first (safe for most pages) with URL encoding
             try:
                 slug = urllib.parse.quote(topic, safe='')
                 url_summary = f"https://en.wikipedia.org/api/rest_v1/page/summary/{slug}"
                 r = requests.get(url_summary, timeout=12)
                 if r.status_code == 200:
                     data = r.json()
-                    # prefer extract (plain text) if available
                     title = data.get("title", "")
                     extract = data.get("extract") or data.get("description") or ""
                     if extract:
                         text = " ".join([str(title), str(extract)])
-                else:
-                    # non-200 can still be a redirect or missing; try action API below
-                    text = ""
-            except Exception as e:
-                # fall through to action API
-                text = ""
+            except Exception:
+                pass
 
-            # Fallback: use MediaWiki action API to get plain extract
+            # Fallback to action API
             if not text:
                 try:
                     q = urllib.parse.quote_plus(topic)
-                    api_url = (
-                        f"https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext&format=json&titles={q}"
-                    )
-                    r2 = requests.get(api_url, timeout=12, headers={"User-Agent": "KNOWMAP/1.0 (contact@example.com)"})
+                    api_url = f"https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext&format=json&titles={q}"
+                    r2 = requests.get(api_url, timeout=12, headers={"User-Agent": "KNOWMAP/1.0"})
                     if r2.status_code == 200:
                         payload = r2.json()
                         pages = payload.get("query", {}).get("pages", {})
-                        # pages is a dict keyed by pageid
                         extracts = []
                         for pid, page in pages.items():
                             ext = page.get("extract") or ""
@@ -211,51 +202,48 @@ with tab_wiki:
                     st.warning(f"Wikipedia fetch error: {e}")
 
             if not text:
-                st.error("Could not fetch Wikipedia content. Try a different topic or check network.")
+                st.error("Could not fetch Wikipedia content.")
             else:
-                st.info(f"Fetched {len(text)} characters from Wikipedia.")
-                process_text_block(text)
+                st.info(f"Fetched {len(text)} characters.")
+                run_extraction_pipeline(text, f"Wikipedia: {topic}")
 
+# --- TAB: NEWS ---
 with tab_news:
-    query = st.text_input("News query", placeholder="e.g., climate change agriculture")
-    limit = st.slider("Articles", 5, 30, 10)
-    if st.button("Fetch News"):
-        if not query:
+    query_news = st.text_input("News query", placeholder="e.g., climate change agriculture")
+    limit_news = st.slider("Articles", 5, 30, 10, key="news_limit")
+    if st.button("Fetch News", key="btn_news"):
+        if not query_news:
             st.warning("Enter a query.")
         else:
-            # Use Google News RSS (no API key required)
-            feed_url = f"https://news.google.com/rss/search?q={requests.utils.quote(query)}&hl=en-US&gl=US&ceid=US:en"
+            feed_url = f"https://news.google.com/rss/search?q={requests.utils.quote(query_news)}&hl=en-US&gl=US&ceid=US:en"
             try:
                 r = requests.get(feed_url, timeout=15)
                 r.raise_for_status()
                 root = ET.fromstring(r.text)
-                ns = {"ns": "http://purl.org/rss/1.0/"}
-                # RSS from Google News typically uses 'item' under channel
-                items = root.findall(".//item")[:limit]
+                items = root.findall(".//item")[:limit_news]
                 parts = []
                 for it in items:
                     title = (it.findtext("title") or "")
                     desc = (it.findtext("description") or "")
                     parts.append(f"{title}. {strip_html(desc)}")
                 text = " ".join(parts)
-                process_text_block(text)
+                run_extraction_pipeline(text, f"News: {query_news}")
             except Exception as e:
                 st.error(f"News fetch failed: {e}")
 
+# --- TAB: ARXIV ---
 with tab_arxiv:
-    query = st.text_input("arXiv query", placeholder="e.g., crop yield drought")
-    limit = st.slider("Papers", 5, 30, 10, key="arxiv_limit")
-    if st.button("Fetch from arXiv"):
-        if not query:
+    query_arxiv = st.text_input("arXiv query", placeholder="e.g., crop yield drought")
+    limit_arxiv = st.slider("Papers", 5, 30, 10, key="arxiv_limit")
+    if st.button("Fetch from arXiv", key="btn_arxiv"):
+        if not query_arxiv:
             st.warning("Enter a query.")
         else:
-            # arXiv Atom API
-            api = f"http://export.arxiv.org/api/query?search_query=all:{requests.utils.quote(query)}&start=0&max_results={limit}"
+            api = f"http://export.arxiv.org/api/query?search_query=all:{requests.utils.quote(query_arxiv)}&start=0&max_results={limit_arxiv}"
             try:
                 r = requests.get(api, timeout=20, headers={"User-Agent": "KNOWMAP/1.0"})
                 r.raise_for_status()
                 root = ET.fromstring(r.text)
-                # Atom namespace
                 ns = {"a": "http://www.w3.org/2005/Atom"}
                 entries = root.findall("a:entry", ns)
                 parts = []
@@ -264,11 +252,53 @@ with tab_arxiv:
                     summary = e.findtext("a:summary", default="", namespaces=ns)
                     parts.append(f"{title}. {summary}")
                 text = " ".join(parts)
-                process_text_block(text)
+                run_extraction_pipeline(text, f"arXiv: {query_arxiv}")
             except Exception as e:
                 st.error(f"arXiv fetch failed: {e}")
 
 st.markdown('</div>', unsafe_allow_html=True)
+
+# --- [RESULTS & STORAGE SECTION] ---
+# This section is outside the tabs/buttons, so it persists after reruns as long as session state has data.
+if st.session_state.get("ingestion_triples"):
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader(f"📊 Review Data: {st.session_state['ingestion_source']}")
+    
+    triples = st.session_state["ingestion_triples"]
+    
+    # 1. DataFrame View
+    df = pd.DataFrame(triples, columns=["Subject", "Relation", "Object"])
+    st.dataframe(df, use_container_width=True)
+
+    # 2. Graph View
+    try:
+        G = pipelines_extraction.triples_to_graph(triples)
+        html = pipelines_extraction.graph_to_pyvis_html(G)
+        components.html(html, height=600, scrolling=True)
+    except Exception as e:
+        st.warning(f"Graph render failed: {e}")
+
+    st.divider()
+
+    # 3. Store Button (Now persistent)
+    col_a, col_b = st.columns([1, 2])
+    with col_a:
+        if st.button("📡 Store in Neo4j Database", type="primary", use_container_width=True):
+            with st.spinner("Storing triples in Neo4j..."):
+                count = pipelines_neo4j_loader.store_triples_in_neo4j(triples)
+            if count > 0:
+                st.success(f"Stored {count} triples successfully in Neo4j graph!")
+                # Optional: Clear state after successful store
+                # st.session_state["ingestion_triples"] = None
+                # st.rerun()
+            else:
+                st.error("Failed to store triples. Check database connection.")
+    with col_b:
+        if st.button("🗑️ Clear Results"):
+            st.session_state["ingestion_triples"] = None
+            st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # --- [SIDECARD INFO] ---
 st.markdown('<div class="card">', unsafe_allow_html=True)

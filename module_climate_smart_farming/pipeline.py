@@ -5,9 +5,29 @@ from .risk_assessment import compute_risk
 from .strategy_engine import load_strategies, recommend
 from .neo4j_mapper import StrategyNeo4jMapper
 import csv
+import os
+from dotenv import load_dotenv
 
-def run_pipeline(cfg_path='agrobase/module_climate_smart_farming/config.yaml'):
+def run_pipeline(cfg_path=None):
+    # Resolve default config path relative to this package to avoid import path issues
+    if cfg_path is None:
+        cfg_path = os.path.join(os.path.dirname(__file__), 'config.yaml')
     cfg = load_config(cfg_path)
+    # Load environment and override Neo4j settings if present
+    try:
+        load_dotenv()
+        env_uri = os.getenv('NEO4J_URI')
+        env_user = os.getenv('NEO4J_USER')
+        env_pwd = os.getenv('NEO4J_PASSWORD')
+        if 'neo4j' in cfg:
+            if env_uri:
+                cfg['neo4j']['uri'] = env_uri
+            if env_user:
+                cfg['neo4j']['user'] = env_user
+            if env_pwd:
+                cfg['neo4j']['password'] = env_pwd
+    except Exception:
+        pass
     data = ingest(cfg)
     merged = merge_tables(data)
     if merged.empty: return []

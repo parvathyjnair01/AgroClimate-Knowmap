@@ -10,9 +10,9 @@ output:
   log_jsonl: "agrobase/module_carbon_sequestration/output/run_log.jsonl"
 neo4j:
   enabled: true
-  uri: "bolt://localhost:8687"
+  uri: "bolt://localhost:7688"
   user: "neo4j"
-  password: "password"
+  password: "StrongPass123"
 engine:
   ml_enabled: true
   ml_model: "linear"
